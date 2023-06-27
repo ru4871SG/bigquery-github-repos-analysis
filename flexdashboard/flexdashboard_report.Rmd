@@ -1,0 +1,542 @@
+---
+title: "Analyzing Github Repositories (2023)"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: scroll
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(shiny)
+library(tidyverse)
+library(scales)
+library(highcharter)
+library(sqldf)
+
+#####Import Data
+# Source ----
+#csv files from R scripts - we use csv (instead of importing directly) because we don't want to import from BigQuery every single time, the files don't change that often, anyway.
+language_ranking <- read.csv("language_ranking.csv") %>% head(35)
+
+binary_files_count <- read.csv("binary_files_count.csv")
+binary_files_count$binary <- as.factor(binary_files_count$binary)
+
+df_repo_sizes_true <- read.csv("df_repo_sizes_true.csv")
+df_repo_sizes_true <- sqldf("
+                            SELECT * 
+                            FROM df_repo_sizes_true 
+                            ORDER BY random() 
+                            LIMIT 5000")
+df_repo_sizes_true$index <- 1:nrow(df_repo_sizes_true)
+
+df_repo_sizes_false <- read.csv("df_repo_sizes_false.csv")
+df_repo_sizes_false <- sqldf("
+                            SELECT * 
+                            FROM df_repo_sizes_false 
+                            ORDER BY random() 
+                            LIMIT 5000")
+df_repo_sizes_false$index <- 1:nrow(df_repo_sizes_false)
+
+top_30_sample_repos <- read.csv("top_30_sample_repos.csv")
+
+top_30_authors <- read.csv("top_30_authors.csv")
+
+top_30_committers <- read.csv("top_30_committers.csv")
+
+top_licenses <- read.csv("top_licenses.csv")
+
+python_top_commits <- read.csv("python_top_commits.csv")
+
+js_top_commits <- read.csv("js_top_commits.csv")
+
+html_top_commits <- read.csv("html_top_commits.csv")
+```
+
+```{css, echo=FALSE}
+@media (max-width: 768px) {
+  .section.level1 {
+    width: 100%;
+  }
+  .section.level2 {
+    width: 100%;
+  }
+  .section.level3 {
+    width: 100%;
+  }
+  
+  pre.sourceCode {
+    font-size: 0.55em; 
+  }
+}
+
+pre.sourceCode {
+  max-height: 400px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+```
+
+{.sidebar}
+-----------------------------------------------------------------------
+
+### Table of Content
+
+```{r}
+p("1: Popular Programming Languages in Github")
+p("2: Binary Files vs. Non-Binary Files")
+p("3. Sizes of Github Repos (Sampled)")
+p("4: Top Repos")
+p("5: Top Authors and Committers")
+p("6: Top Licenses")
+p("7: Top Repos by Language")
+```
+
+Column
+-----------------------------------------------------------------------
+
+### <span style="font-size: 30px;">Github Repos from BigQuery</span>
+__by Ruddy Setiadi Gunawan__
+
+The Github repository dataset is a public dataset stored in Google's BigQuery. It is a product of the collaboration between Google and GitHub, offering a full snapshot of the content of 2.9 million open-source GitHub repositories. The dataset allows for the analysis of almost 2 billion files' source code using SQL queries. 
+
+This report analyze the dataset to find a few interesting trends - inspired by a notebook I found on Kaggle. The original analysis on Kaggle was done over 5 years ago, and since then, the numbers, trends, and stats have changed. Beside the standard analyses, I've also included a few different calculations and visualizations.
+
+Note: All the interactive visualizations below are rendered using the `highcharter` library, while SQL queries are done using libraries like `bigrquery` and `slqdf`.
+
+### <span style="font-size: 24px;">First Analysis: Popular Programming Languages in Github</span>
+
+Let's start with the most common question, what are the most popular programming languages? Thanks to this Github Repos dataset from BigQuery, we can analyze this easily. Instead of using two different platforms, it's much more convenient to just connect your BigQuery account straight to your RStudio, and use a library like `bigrquery`. Here is how I analyze the data:
+```{r, eval=F, echo=T}
+github_repos <- dbConnect(
+  bigrquery::bigquery(),
+  project = "bigquery-public-data",
+  dataset = "github_repos",
+  billing = "<your-project-id>"
+)
+dbListTables(github_repos)
+repo_languages <- tbl(github_repos, "languages")
+sql <- "
+SELECT language.name, COUNT(language.name) as language_count
+FROM `bigquery-public-data.github_repos.languages`, 
+UNNEST(language) as language
+GROUP BY language.name
+ORDER BY language_count DESC
+"
+data_from_sql <- bq_project_query(x = my_billing_id, query = sql)
+table_from_sql <- bq_table_download(data_from_sql)
+```
+
+### <span style="font-size: 20px;">First Analysis: Data Visualization</span>
+
+```{r}
+# First chart
+sliderInput("range", 
+           "Select max number of languages:",
+           min = 5, 
+           max = 30, 
+           value = 10,
+           step = 5)
+
+renderHighchart({
+    # Subset the data based on sliderInput, to manipulate the total number of shown languages
+    subset_ranking <- language_ranking %>%
+      arrange(desc(language_count)) %>%
+      slice(1:min(nrow(language_ranking), input$range))
+    
+    hc <- hchart(subset_ranking, "column", hcaes(x = name, y = language_count, text = paste(name, "- Total Count: ", formatC(language_count, format="d", big.mark=",")))) %>%
+      hc_xAxis(title = list(text = "Language")) %>%
+      hc_yAxis(title = list(text = "Count")) %>%
+      hc_tooltip(
+        formatter = JS(
+          "function() {
+          return this.point.text;
+        }"
+        )
+      ) %>%
+      hc_chart(
+        backgroundColor = '#ffffff',
+        plotBackgroundColor = '#ffffff',
+        plotBorderWidth = 0,
+        plotShadow = FALSE,
+        borderColor = '#cdcdcd',
+        borderWidth = 1,
+        height = 350
+      ) %>%
+      hc_plotOptions(
+        series = list(
+          borderColor = '#222222'
+        )
+      ) %>%
+      hc_title(text = "Most Popular Programming Languages") %>%
+      hc_colors("#428f61") %>%
+      hc_credits(enabled = FALSE) %>%
+      hc_exporting(enabled = FALSE)
+    
+    hc
+  })
+```
+
+### <span style="font-size: 20px;">First Analysis: Interpretation</span>
+
+Javascript is the most popular language in Github, based on total count of programming languages by repository. CSS and HTML conquered the 2nd and 3rd spot, while Python is also included in the top 5 ranking. Commonly-used languages like Ruby, Java, and C are all still in the top 10 ranking. Unfortunately, the language that I use to build this report, R, is only ranked 30th. You can move the slider input above to visualize different number of languages in the same visualization.
+
+### <span style="font-size: 24px;">Second Analysis: Binary Files vs. Non-Binary Files</span>
+
+Binary files are composed of binary data, which can be read by the computer but are not human-readable. On the other hand, non-binary files contain human-readable data, such as source code or plain text documents. Below we analyze the total count of binary files vs. non-binary files, to see which one is more popular, and their differences.
+```{r, eval=F, echo=T}
+github_repos <- dbConnect(
+  bigrquery::bigquery(),
+  project = "bigquery-public-data",
+  dataset = "github_repos",
+  billing = "<your-project-id>"
+)
+dbListTables(github_repos)
+repo_contents <- tbl(github_repos, "contents")
+
+sql_2 <- "
+  SELECT binary, COUNT(binary) as binary_count
+  FROM `bigquery-public-data.github_repos.contents`
+  GROUP BY binary
+"
+
+data_from_sql_2 <- bq_project_query(x = my_billing_id, query = sql_2)
+binary_files_count <- bq_table_download(data_from_sql_2)
+```
+
+### <span style="font-size: 20px;">Second Analysis: Data Visualization</span>
+```{r}
+renderHighchart({
+
+    hchart(binary_files_count, "column", hcaes(x = binary, y = binary_count)) %>%
+      hc_title(text = "Binary Files (True) vs. Non-Binary (False)") %>%
+      hc_xAxis(title = list(text = "File Type")) %>%
+      hc_yAxis(title = list(text = "Total Count")) %>%
+      hc_tooltip(formatter = JS("function() {
+    return Highcharts.numberFormat(this.y, 0, ',', ',');
+  }")) %>%
+    hc_chart(height = 450) %>%
+    hc_plotOptions(
+        series = list(
+          borderColor = '#222222'
+        )
+      ) %>%
+    hc_colors("#428f61") %>%
+    hc_credits(enabled = FALSE) %>%
+    hc_exporting(enabled = FALSE)
+  })
+```
+
+### <span style="font-size: 20px;">Second Analysis: Interpretation</span>
+
+As expected, non-binary files dominate Github repositories. Many users commit non-binary files for collaboration, and the total count of non-binary files is over 4.38 times larger than that of binary files.
+
+### <span style="font-size: 24px;">Third Analysis: Sizes of Github Repos (Sampled)</span>
+
+This section analyzes average sizes of github repos, to compare and visualize how often they reach different levels of file size. I sampled 1,000,000 row values with `ORDER BY RAND()` in my SQL queries, and then I cut them down further to 5,000 rows pre- data visualization with `ORDER BY random()` using `sqldf`, otherwise it'll be too big to analyze them all.
+
+```{r, eval=F, echo=T}
+sql_3 <- "
+    SELECT size
+    FROM `bigquery-public-data.github_repos.contents`
+    WHERE binary = true
+    ORDER BY RAND()
+    LIMIT 1000000
+"
+
+sql_4 <- "
+    SELECT size
+    FROM `bigquery-public-data.github_repos.contents`
+    WHERE binary = false
+    ORDER BY RAND()
+    LIMIT 1000000
+"
+
+github_repo_sizes <- dbGetQuery(github_repos, sql_3)
+github_repo_sizes_2 <- dbGetQuery(github_repos, sql_4)
+BYTES_PER_MB = 2^20
+
+df_repo_sizes_true <- data.frame(size = github_repo_sizes / BYTES_PER_MB)
+df_repo_sizes_false <- data.frame(size = github_repo_sizes_2 / BYTES_PER_MB)
+
+df_repo_sizes_true <- sqldf("
+                            SELECT * 
+                            FROM df_repo_sizes_true 
+                            ORDER BY random() 
+                            LIMIT 5000")
+df_repo_sizes_false <- sqldf("
+                            SELECT * 
+                            FROM df_repo_sizes_false 
+                            ORDER BY random() 
+                            LIMIT 5000")
+```
+
+### <span style="font-size: 20px;">Third Analysis: Data Visualization 1 (for Binary Files)</span>
+```{r}
+renderHighchart({
+    
+    highchart() %>%
+      hc_title(text = "5000 Github Repo Samples in MBs (Binary)") %>%
+      hc_xAxis(title = list(text = "Index")) %>%
+      hc_yAxis(title = list(text = "")) %>%
+      hc_add_series(data = df_repo_sizes_true, hcaes(x = index, y = size), type = "line", color = "#428f61") %>%
+      hc_tooltip(formatter = JS("function () {
+                      return 'Size: ' + this.y;
+                    }")) %>%
+      hc_chart(borderColor = '#cdcdcd', borderWidth = 1, height = 400) %>%
+      hc_legend(enabled = FALSE)
+  })
+```
+
+### <span style="font-size: 20px;">Third Analysis: Data Visualization 2 (for Non-Binary Files)</span>
+```{r}
+renderHighchart({
+    
+    highchart() %>%
+      hc_title(text = "5000 Github Repo Samples in MBs (Non-Binary)") %>%
+      hc_xAxis(title = list(text = "Index")) %>%
+      hc_yAxis(title = list(text = "")) %>%
+      hc_add_series(data = df_repo_sizes_false, hcaes(x = index, y = size), type = "line", color = "#428f61") %>%
+      hc_tooltip(formatter = JS("function () {
+                      return 'Size: ' + this.y;
+                    }")) %>%
+      hc_chart(borderColor = '#cdcdcd', borderWidth = 1) %>%
+      hc_legend(enabled = FALSE)
+  })
+```
+
+### <span style="font-size: 20px;">Third Analysis: Interpretation</span>
+
+Based on the final 5,000 samples, we can observe that binary files are considerably larger than non-binary files. One of the binary file samples can even exceed 70 MB. The binary file visualization also presents more "spikes," indicating that the sizes of binary files fluctuate more often.
+
+### <span style="font-size: 24px;">Fourth Analysis: Top Repos</span>
+
+This section analyzes top repositories in Github, and we use `sample_repos` table instead of the full commits table, because we want to analyze only publicly-accessible repositories.
+
+```{r, eval=F, echo=T}
+sql_5 <- "
+      SELECT * 
+      FROM `bigquery-public-data.github_repos.sample_repos` 
+      ORDER BY watch_count DESC
+      LIMIT 30
+"
+
+data_from_sql_5 <- bq_project_query(x = my_billing_id, query = sql_5)
+top_30_sample_repos <- bq_table_download(data_from_sql_5)
+```
+
+### <span style="font-size: 20px;">Fourth Analysis: Data Visualization</span>
+```{r}
+renderHighchart ({
+    hchart(top_30_sample_repos, "column", hcaes(x = repo_name, y = watch_count), color = "#428f61") %>%
+      hc_title(text = "Top 30 Sample Repos") %>%
+      hc_xAxis(title = list(text = "Repo Name")) %>%
+      hc_yAxis(title = list(text = "Watch Count")) %>%
+      hc_tooltip(formatter = JS("function() {
+    return Highcharts.numberFormat(this.y, 0, ',', ',');
+  }")) %>%
+    hc_chart(height = 400)
+})
+```
+
+### <span style="font-size: 20px;">Fourth Analysis: Interpretation</span>
+
+`FreeCodeCamp` repo is the most popular repository, and by a wide margin. We can also see some of the other very popular repositories, such as `netdata`, `tensorflow`, `HowToBeAProgrammer`, and `facebook/react`. If you have been learning some programming languages recently, you may have heard at least one of these.
+
+### <span style="font-size: 24px;">Fifth Analysis: Top Authors and Committers</span>
+
+This section analyzes top authors as well as top committers. Github authors are the individuals who submitted the original codes. Meanwhile, top committers are those who made the most commits.
+
+```{r, eval=F, echo=T}
+sql_6 <- "
+      SELECT author.name, COUNT(author.name) as author_count 
+      FROM `bigquery-public-data.github_repos.commits`
+      GROUP BY author.name
+      ORDER BY author_count DESC
+      LIMIT 30
+"
+
+data_from_sql_6 <- bq_project_query(x = my_billing_id, query = sql_6)
+top_30_authors <- bq_table_download(data_from_sql_6)
+
+sql_7 <- "
+      SELECT committer.name, COUNT(committer.name) as committer_count 
+      FROM `bigquery-public-data.github_repos.commits`
+      GROUP BY committer.name
+      ORDER BY committer_count DESC
+      LIMIT 30
+"
+
+data_from_sql_7 <- bq_project_query(x = my_billing_id, query = sql_7)
+top_30_committers <- bq_table_download(data_from_sql_7)
+
+if (top_30_committers[1, "name"] == 'GitHub') {
+  top_30_committers <- top_30_committers[-1, ]
+} else {
+  top_30_committers <- top_30_committers
+}
+```
+
+### <span style="font-size: 20px;">Fifth Analysis: Data Visualization 1 (Authors)</span>
+```{r}
+renderHighchart ({
+    hchart(top_30_authors, "column", hcaes(x = name, y = author_count), color = "#428f61") %>%
+      hc_title(text = "Top 30 Authors") %>%
+      hc_xAxis(title = list(text = "Name")) %>%
+      hc_yAxis(title = list(text = "Author Count")) %>%
+      hc_tooltip(formatter = JS("function() {
+    return Highcharts.numberFormat(this.y, 0, ',', ',');
+  }")) %>%
+    hc_chart(height = 400)
+})
+```
+
+### <span style="font-size: 20px;">Fifth Analysis: Data Visualization 2 (Committers)</span>
+```{r}
+renderHighchart ({
+    hchart(top_30_committers, "column", hcaes(x = name, y = committer_count), color = "#428f61") %>%
+      hc_title(text = "Top 30 Committers") %>%
+      hc_xAxis(title = list(text = "Name")) %>%
+      hc_yAxis(title = list(text = "Committer Count")) %>%
+      hc_tooltip(formatter = JS("function() {
+    return Highcharts.numberFormat(this.y, 0, ',', ',');
+  }")) %>%
+    hc_chart(height = 400)
+})
+
+```
+
+### <span style="font-size: 20px;">Fifth Analysis: Interpretation</span>
+shenzhouhd dominates the competition for the top authors, while a famous programmer Duane F. King sits comfortably in the third position, only to be surpassed by a Github bot called dependabot and shenzhouhd. The same Duane F. King also sits on the top of the committers ranking as you can see from the second chart. This analysis has proven that many top authors and top committers are usually the same entities or individuals.
+
+### <span style="font-size: 24px;">Sixth Analysis: Top Licenses</span>
+
+This section covers top licenses. As we know, many popular Github repositories are licensed, and some of them can't just be used commercially without citing the license. If you are curious which licenses are the most commonly used, let's check out the analysis.
+
+```{r, eval=F, echo=T}
+sql_8 <- "
+      SELECT license, COUNT(license) as license_count
+      FROM `bigquery-public-data.github_repos.licenses` 
+      GROUP BY license
+      ORDER BY license_count DESC
+"
+
+data_from_sql_8 <- bq_project_query(x = my_billing_id, query = sql_8)
+top_licenses <- bq_table_download(data_from_sql_8)
+```
+
+### <span style="font-size: 20px;">Sixth Analysis: Data Visualization</span>
+```{r}
+renderHighchart({
+    hchart(top_licenses, "column", hcaes(x = license, y = license_count), color = "#428f61") %>%
+      hc_title(text = "Top Licenses") %>%
+      hc_xAxis(title = list(text = "License")) %>%
+      hc_yAxis(title = list(text = "License Count")) %>%
+      hc_tooltip(formatter = JS("function() {
+    return Highcharts.numberFormat(this.y, 0, ',', ',');
+  }")) %>%
+    hc_chart(height = 400)
+})
+```
+
+### <span style="font-size: 20px;">Sixth Analysis: Interpretation</span>
+MIT license is the most commonly-used license in Github repositories. You may have expected this result already if you are a developer yourself, because we keep seeing MIT license being quoted everywhere. apache-2.0, gpl-2.0, and gpl-3.0 licenses are also everywhere, and they are rightfully placed in the top 5 ranking.
+
+### <span style="font-size: 24px;">Seventh Analysis: Top Repos by Language</span>
+
+Now we've analyzed them all, I believe it would be more interesting to expand the top repos analysis but this time we divide the top repos by the programming language. This analysis is going to be too long if we analyze top repositories by every programming language, so I focused only on three favorite programming languages, HTML, Javascript, and Python. In this section, we analyze the top repositories for them.
+
+```{r, eval=F, echo=T}
+sql_9 <- "
+        WITH only_python AS (
+            SELECT DISTINCT repo_name
+            FROM `bigquery-public-data.github_repos.sample_files`
+            WHERE path LIKE '%.py')
+        SELECT commits.repo_name, COUNT(commit) AS commits_count
+        FROM `bigquery-public-data.github_repos.sample_commits` AS commits
+        JOIN only_python AS repofiles
+        ON commits.repo_name = repofiles.repo_name
+        GROUP BY commits.repo_name
+        ORDER BY commits_count DESC
+"
+data_from_sql_9 <- bq_project_query(x = my_billing_id, query = sql_9)
+python_top_commits <- bq_table_download(data_from_sql_9)
+
+sql_10 <- "
+        WITH only_js AS (
+            SELECT DISTINCT repo_name
+            FROM `bigquery-public-data.github_repos.sample_files`
+            WHERE path LIKE '%.js')
+        SELECT commits.repo_name, COUNT(commit) AS commits_count
+        FROM `bigquery-public-data.github_repos.sample_commits` AS commits
+        JOIN only_js AS repofiles
+        ON commits.repo_name = repofiles.repo_name
+        GROUP BY commits.repo_name
+        ORDER BY commits_count DESC
+"
+data_from_sql_10 <- bq_project_query(x = my_billing_id, query = sql_10)
+js_top_commits <- bq_table_download(data_from_sql_10)
+
+sql_11 <- "
+        WITH only_html AS (
+            SELECT DISTINCT repo_name
+            FROM `bigquery-public-data.github_repos.sample_files`
+            WHERE path LIKE '%.html')
+        SELECT commits.repo_name, COUNT(commit) AS commits_count
+        FROM `bigquery-public-data.github_repos.sample_commits` AS commits
+        JOIN only_html AS repofiles
+        ON commits.repo_name = repofiles.repo_name
+        GROUP BY commits.repo_name
+        ORDER BY commits_count DESC
+"
+data_from_sql_11 <- bq_project_query(x = my_billing_id, query = sql_11)
+html_top_commits <- bq_table_download(data_from_sql_11)
+```
+
+### <span style="font-size: 20px;">Seventh Analysis: Data Visualization 1 (HTML)</span>
+```{r}
+renderHighchart({
+    hchart(html_top_commits, "column", hcaes(x = repo_name, y = commits_count), color = "#428f61") %>%
+      hc_title(text = "HTML Top Repos") %>%
+      hc_xAxis(title = list(text = "HTML Repo Name")) %>%
+      hc_yAxis(
+        title = list(text = "Commit Counts")
+      ) %>%
+      hc_tooltip(formatter = JS("function() {
+        return Highcharts.numberFormat(this.y, 0, ',', ',');
+      }")) %>%
+      hc_chart(height = 400)
+})
+```
+
+### <span style="font-size: 20px;">Seventh Analysis: Data Visualization 2 (JavaScript)</span>
+```{r}
+renderHighchart({
+    hchart(js_top_commits, "column", hcaes(x = repo_name, y = commits_count), color = "#428f61") %>%
+      hc_title(text = "JS Top Repos") %>%
+      hc_xAxis(title = list(text = "JS Repo Name")) %>%
+      hc_yAxis(title = list(text = "Commit Counts")) %>%
+      hc_tooltip(formatter = JS("function() {
+    return Highcharts.numberFormat(this.y, 0, ',', ',');
+  }")) %>%
+    hc_chart(height = 400)
+})
+```
+
+### <span style="font-size: 20px;">Seventh Analysis: Data Visualization 3 (Python)</span>
+```{r}
+renderHighchart({
+    hchart(python_top_commits, "column", hcaes(x = repo_name, y = commits_count), color = "#428f61") %>%
+      hc_title(text = "Python Top Repos") %>%
+      hc_xAxis(title = list(text = "Python Repo Name")) %>%
+      hc_yAxis(title = list(text = "Commit Counts")) %>%
+      hc_tooltip(formatter = JS("function() {
+    return Highcharts.numberFormat(this.y, 0, ',', ',');
+  }")) %>%
+    hc_chart(height = 400)
+})
+```
+
+### <span style="font-size: 20px;">Seventh Analysis: Interpretation</span>
+`torvalds/linux`, which hosts Linux kernel source tree, dominates the charts for both HTML and Python commits, leading by a very wide margin compared to the other top repositories. Meanwhile, `apple/swift` (Swift programming language by Apple) has the highest number of commits for Javascript, and it's also ranked second for both HTML and Python. Interestingly, `vscode`, `react`, and `tensorflow` appear in the top rankings for all three languages.
