@@ -499,7 +499,7 @@ html_top_commits <- bq_table_download(data_from_sql_11)
 renderHighchart({
     hchart(html_top_commits, "column", hcaes(x = repo_name, y = commits_count), color = "#428f61") %>%
       hc_title(text = "HTML Top Repos") %>%
-      hc_xAxis(title = list(text = "HTML Repo Name")) %>%
+      hc_xAxis(title = list(text = "Repo Name")) %>%
       hc_yAxis(
         title = list(text = "Commit Counts")
       ) %>%
@@ -515,7 +515,7 @@ renderHighchart({
 renderHighchart({
     hchart(js_top_commits, "column", hcaes(x = repo_name, y = commits_count), color = "#428f61") %>%
       hc_title(text = "JS Top Repos") %>%
-      hc_xAxis(title = list(text = "JS Repo Name")) %>%
+      hc_xAxis(title = list(text = "Repo Name")) %>%
       hc_yAxis(title = list(text = "Commit Counts")) %>%
       hc_tooltip(formatter = JS("function() {
     return Highcharts.numberFormat(this.y, 0, ',', ',');
@@ -529,7 +529,7 @@ renderHighchart({
 renderHighchart({
     hchart(python_top_commits, "column", hcaes(x = repo_name, y = commits_count), color = "#428f61") %>%
       hc_title(text = "Python Top Repos") %>%
-      hc_xAxis(title = list(text = "Python Repo Name")) %>%
+      hc_xAxis(title = list(text = "Repo Name")) %>%
       hc_yAxis(title = list(text = "Commit Counts")) %>%
       hc_tooltip(formatter = JS("function() {
     return Highcharts.numberFormat(this.y, 0, ',', ',');
